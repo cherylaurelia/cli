@@ -34,6 +34,10 @@ occurrence is retained, including duplicate names. A continuation means
 more of the report remains to be searched, not necessarily more matches.
 API refusal or a changed report fails the command without partial output.
 
+Counts describe all recorded occurrences before filtering, including repeats.
+Older reports may have unknown counts. --summary cannot be combined with
+test filters, --cursor or --limit; it does not list individual results.
+
 **Arguments**
 
 - <code class="cli-arg">JOB</code>
@@ -48,6 +52,8 @@ API refusal or a changed report fails the command without partial output.
 - <code class="cli-flag">&#x2D;&#x2D;suite</code> <code class="cli-value">&lt;TEXT&gt;</code> — Exact suite name; combined with other filters using AND.
 - <code class="cli-flag">&#x2D;&#x2D;class</code> <code class="cli-value">&lt;TEXT&gt;</code> — Exact nonempty class name.
 - <code class="cli-flag">&#x2D;&#x2D;status</code> <code class="cli-value">&lt;CHOICE&gt;</code> — Recorded test outcome. _(choices: `passed`, `failed`, `skipped`, `errored`)_
+- <code class="cli-flag">&#x2D;&#x2D;failures</code> — Show failed and errored results together. Cannot combine with --status.
+- <code class="cli-flag">&#x2D;&#x2D;summary</code> — Show report counts and collection state without downloading test results.
 - <code class="cli-flag">&#x2D;&#x2D;json</code> <code class="cli-value">&lt;TEXT&gt;</code> — Output JSON. Pass comma-separated field names, "*" for all fields, or "?" to list available fields.
 - <code class="cli-flag">-q, &#x2D;&#x2D;jq</code> <code class="cli-value">&lt;TEXT&gt;</code> — Filter --json output through a jq expression.
 

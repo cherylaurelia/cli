@@ -570,3 +570,87 @@ def test_filter_cursor_mismatch_explains_recovery(runner: CliRunner, job_api: Fa
     assert "same filters" in result.output
     assert "restart without --cursor" in result.output
     assert "Retained occurrences" not in result.stdout
+
+
+COUNTS = {"passed": 1, "failed": 1, "skipped": 0, "errored": 1}
+
+
+def test_failures_include_errors_and_keep_unfiltered_counts(runner: CliRunner, job_api: FakeApi) -> None:
+    filters = {"outcomes": ["errored", "failed"]}
+    job_api.reply("GET", RESULTS_PATH, json=page([], cursor="next", filters=filters, counts=COUNTS))
+    job_api.reply("GET", RESULTS_PATH, json=page([ROW, {**ROW, "outcome": "errored"}], filters=filters, counts=COUNTS))
+    result = runner.invoke(cli, ["tests", JOB, *SCOPE, "--failures", "--json", "*"])
+    assert result.exit_code == 0, result.output
+    response = json.loads(result.stdout)
+    assert response["counts"] == COUNTS
+    assert [row["outcome"] for row in response["data"]] == ["failed", "errored"]
+    assert all(request.url.params["outcome"] == "in.(errored,failed)" for request in job_api.sent("GET", RESULTS_PATH))
+
+
+@pytest.mark.parametrize("counts", [COUNTS, None])
+def test_summary_uses_only_summary_endpoint(runner: CliRunner, job_api: FakeApi, counts: dict | None) -> None:
+    summary = page([], counts=counts, total_count=3 if counts else None)
+    for field in ("data", "pagination"):
+        del summary[field]
+    job_api.reply("GET", RESULTS_PATH + "/summary", json=summary)
+    result = runner.invoke(cli, ["tests", JOB, *SCOPE, "--summary", "--json", "*"])
+    assert result.exit_code == 0, result.output
+    response = json.loads(result.stdout)
+    assert response["counts"] == counts
+    assert "data" not in response
+    assert "pagination" not in response
+    assert not job_api.sent("GET", RESULTS_PATH)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--failures", "--status", "failed"],
+        ["--summary", "--failures"],
+        ["--summary", "--test", "login"],
+        ["--summary", "--cursor", "next"],
+        ["--summary", "--limit", "1"],
+    ],
+)
+def test_summary_and_filter_conflicts_fail_before_network(runner: CliRunner, api: FakeApi, extra: list[str]) -> None:
+    result = runner.invoke(cli, ["tests", JOB, *SCOPE, *extra])
+    assert result.exit_code == 2, result.output
+    assert not api.requests
+
+
+def test_summary_text_distinguishes_unknown_counts(runner: CliRunner, job_api: FakeApi) -> None:
+    job_api.reply("GET", RESULTS_PATH + "/summary", json=page([], counts=None, total_count=None))
+    result = runner.invoke(cli, ["tests", JOB, *SCOPE, "--summary"])
+    assert result.exit_code == 0, result.output
+    assert "Counts: unknown" in result.stdout
+    assert "shown:" not in result.stdout
+    assert "No more results" not in result.stdout
+
+
+def test_changed_counts_never_emit_partial_success(runner: CliRunner, job_api: FakeApi) -> None:
+    job_api.reply("GET", RESULTS_PATH, json=page([ROW], cursor="next", counts=COUNTS))
+    job_api.reply("GET", RESULTS_PATH, json=page([ROW], counts={**COUNTS, "passed": 0, "skipped": 1}))
+    result = runner.invoke(cli, ["tests", JOB, *SCOPE, "--json", "*"])
+    assert result.exit_code == 1
+    assert not result.stdout
+    assert "Job results changed while reading pages" in result.stderr
+
+
+def test_failure_filter_on_old_api_explains_separate_status_reads(runner: CliRunner, job_api: FakeApi) -> None:
+    job_api.reply("GET", RESULTS_PATH, status=422, json={"detail": "unsupported outcome selector"})
+    result = runner.invoke(cli, ["tests", JOB, *SCOPE, "--failures"])
+    assert result.exit_code == 1
+    assert "API may need an update" in result.stderr
+    assert "--status failed and --status errored separately" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "counts", [{}, {**COUNTS, "passed": -1}, {**COUNTS, "passed": True}, {**COUNTS, "passed": 2}, "unknown"]
+)
+@pytest.mark.parametrize("summary", [False, True])
+def test_invalid_counts_are_not_reported(runner: CliRunner, job_api: FakeApi, counts: Any, summary: bool) -> None:
+    job_api.reply("GET", RESULTS_PATH + ("/summary" if summary else ""), json=page([ROW], counts=counts))
+    result = runner.invoke(cli, ["tests", JOB, *SCOPE, *(["--summary"] if summary else []), "--json", "*"])
+    assert result.exit_code == 1
+    assert not result.stdout
+    assert "invalid test outcome counts" in result.stderr

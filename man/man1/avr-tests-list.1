@@ -10,6 +10,8 @@ Read the latest confirmed execution of JOB, including repeated tests.
 Names, outcomes, recorded durations and available failure messages are shown together. A failed test is data, not a command error. Missing, pending, partial and expired evidence are reported explicitly; an older execution is never substituted. Complete describes collected reports.
 .PP
 Use --json '*' for the complete response or --json FIELDS to select fields. Continue with --cursor when pagination.next_cursor is present. Filters match literally and are combined with AND. Every matching occurrence is retained, including duplicate names. A continuation means more of the report remains to be searched, not necessarily more matches. API refusal or a changed report fails the command without partial output.
+.PP
+Counts describe all recorded occurrences before filtering, including repeats. Older reports may have unknown counts. --summary cannot be combined with test filters, --cursor or --limit; it does not list individual results.
 .SH ARGUMENTS
 .TP
 \fIJOB\fR
@@ -39,6 +41,12 @@ Exact nonempty class name.
 .TP
 \fB\-\-status\fR \fICHOICE\fR
 Recorded test outcome. (choices: passed, failed, skipped, errored)
+.TP
+\fB\-\-failures\fR
+Show failed and errored results together. Cannot combine with --status.
+.TP
+\fB\-\-summary\fR
+Show report counts and collection state without downloading test results.
 .TP
 \fB\-\-json\fR \fITEXT\fR
 Output JSON. Pass comma-separated field names, "*" for all fields, or "?" to list available fields.

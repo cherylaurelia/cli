@@ -1344,6 +1344,10 @@ occurrence is retained, including duplicate names. A continuation means
 more of the report remains to be searched, not necessarily more matches.
 API refusal or a changed report fails the command without partial output.
 
+Counts describe all recorded occurrences before filtering, including repeats.
+Older reports may have unknown counts. --summary cannot be combined with
+test filters, --cursor or --limit; it does not list individual results.
+
 **Arguments**
 
 - `JOB`
@@ -1358,6 +1362,8 @@ API refusal or a changed report fails the command without partial output.
 - `--suite <TEXT>` — Exact suite name; combined with other filters using AND.
 - `--class <TEXT>` — Exact nonempty class name.
 - `--status <CHOICE>` — Recorded test outcome. _(choices: `passed`, `failed`, `skipped`, `errored`)_
+- `--failures` — Show failed and errored results together. Cannot combine with --status.
+- `--summary` — Show report counts and collection state without downloading test results.
 - `--json <TEXT>` — Output JSON. Pass comma-separated field names, "*" for all fields, or "?" to list available fields.
 - `-q, --jq <TEXT>` — Filter --json output through a jq expression.
 

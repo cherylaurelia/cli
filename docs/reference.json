@@ -6292,7 +6292,7 @@
             "full": "avr tests list",
             "is_group": false,
             "short_help": "Read the latest confirmed execution of JOB, including repeated tests.",
-            "help": "Read the latest confirmed execution of JOB, including repeated tests.\n\nNames, outcomes, recorded durations and available failure messages are\nshown together. A failed test is data, not a command error. Missing,\npending, partial and expired evidence are reported explicitly; an older\nexecution is never substituted. Complete describes collected reports.\n\nUse --json '*' for the complete response or --json FIELDS to select\nfields. Continue with --cursor when pagination.next_cursor is present.\nFilters match literally and are combined with AND. Every matching\noccurrence is retained, including duplicate names. A continuation means\nmore of the report remains to be searched, not necessarily more matches.\nAPI refusal or a changed report fails the command without partial output.\n",
+            "help": "Read the latest confirmed execution of JOB, including repeated tests.\n\nNames, outcomes, recorded durations and available failure messages are\nshown together. A failed test is data, not a command error. Missing,\npending, partial and expired evidence are reported explicitly; an older\nexecution is never substituted. Complete describes collected reports.\n\nUse --json '*' for the complete response or --json FIELDS to select\nfields. Continue with --cursor when pagination.next_cursor is present.\nFilters match literally and are combined with AND. Every matching\noccurrence is retained, including duplicate names. A continuation means\nmore of the report remains to be searched, not necessarily more matches.\nAPI refusal or a changed report fails the command without partial output.\n\nCounts describe all recorded occurrences before filtering, including repeats.\nOlder reports may have unknown counts. --summary cannot be combined with\ntest filters, --cursor or --limit; it does not list individual results.\n",
             "epilog": null,
             "deprecated": false,
             "hidden": false,
@@ -6466,6 +6466,42 @@
                   "skipped",
                   "errored"
                 ]
+              },
+              {
+                "name": "failures",
+                "kind": "option",
+                "opts": [
+                  "--failures"
+                ],
+                "secondary_opts": [],
+                "type": "boolean",
+                "required": false,
+                "multiple": false,
+                "nargs": 1,
+                "is_flag": true,
+                "envvar": null,
+                "help": "Show failed and errored results together. Cannot combine with --status.",
+                "hidden": false,
+                "show_default": false,
+                "default": null
+              },
+              {
+                "name": "summary",
+                "kind": "option",
+                "opts": [
+                  "--summary"
+                ],
+                "secondary_opts": [],
+                "type": "boolean",
+                "required": false,
+                "multiple": false,
+                "nargs": 1,
+                "is_flag": true,
+                "envvar": null,
+                "help": "Show report counts and collection state without downloading test results.",
+                "hidden": false,
+                "show_default": false,
+                "default": null
               },
               {
                 "name": "json_fields",
