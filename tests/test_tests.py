@@ -416,11 +416,20 @@ def test_text_listing_keeps_result_handles_out_of_normal_workflow(runner: CliRun
     assert "result-one" not in result.output
 
 
-def test_view_expired_keeps_coarse_commit_context(runner: CliRunner, api: FakeApi) -> None:
-    api.reply("GET", RESULT_PATH, json=exact_result(status="expired", data=None))
+@pytest.mark.parametrize(
+    "state,message",
+    [
+        ("expired", "This report has expired"),
+        ("not_recorded", "No retained report is available"),
+    ],
+)
+def test_view_unavailable_keeps_coarse_commit_context(
+    runner: CliRunner, api: FakeApi, state: str, message: str
+) -> None:
+    api.reply("GET", RESULT_PATH, json=exact_result(status=state, data=None))
     result = runner.invoke(cli, ["tests", "view", "result-one", *SCOPE, "--repo", REPO])
     assert result.exit_code == 0, result.output
-    assert "This report has expired" in result.output
+    assert message in result.output
     assert "Recorded job commit: " + "b" * 40 in result.output
 
 

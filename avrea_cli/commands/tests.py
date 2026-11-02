@@ -431,12 +431,14 @@ def tests_view(
         return
     click.echo(f"Result: {_text(result_id)}  Status: {_text(state)}")
     click.echo(f"Organization: {_text(organization)}  Repository: {_text(repository)}")
-    if state == "expired":
-        click.echo("This report has expired. Test names and failure output are no longer retained.")
+    if state in ("expired", "not_recorded"):
+        click.echo(
+            "This report has expired. Test names and failure output are no longer retained."
+            if state == "expired"
+            else "No retained report is available for this result."
+        )
         if response.get("commit_sha"):
             click.echo(f"Recorded job commit: {_text(response['commit_sha'])}")
-    elif state == "not_recorded":
-        click.echo("No retained report is available for this result.")
     else:
         assert isinstance(row, dict)
         click.echo(f"Original job: {_text(response.get('job_id'))}")
