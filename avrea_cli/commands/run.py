@@ -50,6 +50,7 @@ from avrea_cli.repo_context import resolve_repos_or_detect
 from avrea_cli.run_diagnostics import build_run_diagnostics
 from avrea_cli.run_diagnostics_display import render_run_diagnostics
 from avrea_cli.run_refs import RunReference
+from avrea_cli.run_refs import is_platform_job
 from avrea_cli.run_refs import parse_run_reference
 from avrea_cli.run_refs import resolve_run_reference
 from datetime import UTC
@@ -495,6 +496,16 @@ def _run_reference_and_org(
     return reference, resolved_org_id
 
 
+def _refuse_job_url(value: str, config: CliConfig, command: str) -> None:
+    """Keep a link to one job from driving a command that acts on a whole run."""
+    reference = parse_run_reference(value, api_url=config.public_api_url)
+    if reference.platform_job_id is not None:
+        raise click.ClickException(
+            f"This is a job URL, but `avr run {command}` acts on a whole run. "
+            f"Pass the run instead: avr run {command} {reference.platform_run_id}"
+        )
+
+
 def _resolve_run_argument(
     client: ApiClient,
     config: CliConfig,
@@ -586,8 +597,8 @@ def run_view(
 
     \b
     RUN accepts an Avrea run ID, a positive GitHub run ID, a GitHub Actions
-    run URL, or an Avrea console run URL. Without RUN, shows 10 most recent
-    runs.
+    run or job URL, or an Avrea console run URL. A job URL opens the attempt
+    that job belongs to. Without RUN, shows 10 most recent runs.
 
     \b
     Examples:
@@ -595,6 +606,7 @@ def run_view(
         avr run view run-019e5a2e474e71c297e452279d4bcdea
         avr run view 123456789
         avr run view https://github.com/acme/widgets/actions/runs/123456789
+        avr run view https://github.com/acme/widgets/actions/runs/123456789/job/987654321
         avr run view run-019e5a2e474e71c297e452279d4bcdea --steps
         avr run view run-019e5a2e474e71c297e452279d4bcdea --log-failed
         avr run view run-019e5a2e474e71c297e452279d4bcdea --job Build
@@ -805,7 +817,8 @@ def run_diagnose(ctx, run: str, org_id: str | None, json_output: bool) -> None:
     """Explain a failed or unexpectedly slow workflow run.
 
     RUN accepts the same Avrea IDs, GitHub run IDs, and run URLs as
-    `avr run view`. The report combines jobs and failed steps, bounded
+    `avr run view`. A job URL selects that job's attempt; the report still
+    covers the whole attempt. The report combines jobs and failed steps, bounded
     failed-job log tails, queue/execution timings, runner metrics, and a
     prior-success workflow baseline.
 
@@ -814,6 +827,7 @@ def run_diagnose(ctx, run: str, org_id: str | None, json_output: bool) -> None:
         avr run diagnose run-019e5a2e474e71c297e452279d4bcdea
         avr run diagnose 123456789 --json
         avr run diagnose https://github.com/acme/widgets/actions/runs/123456789
+        avr run diagnose https://github.com/acme/widgets/actions/runs/123456789/job/987654321
     """
     client: ApiClient = ctx.obj["client"]
     config: CliConfig = ctx.obj["config"]
@@ -1378,6 +1392,7 @@ def run_rerun(ctx, run: str, org_id, failed: bool, yes: bool):
     config: CliConfig = ctx.obj["config"]
     ensure_authenticated(config)
 
+    _refuse_job_url(run, config, "rerun")
     existing_data, org_id, run_id = _resolve_run_argument(
         client,
         config,
@@ -1467,7 +1482,7 @@ def run_logs(
     """Fetch logs for a workflow run's jobs.
 
     RUN accepts the same Avrea IDs, GitHub run IDs, and run URLs as
-    `avr run view`.
+    `avr run view`. A GitHub job URL shows only that job's logs.
 
     Long-form alternative to `avr run view --log[-failed]`. Use --follow to
     tail logs in real time for an in-progress job; pass --job to scope to a
@@ -1479,6 +1494,7 @@ def run_logs(
         avr run logs run-019e5a2e474e71c297e452279d4bcdea --failed
         avr run logs run-019e5a2e474e71c297e452279d4bcdea --job test
         avr run logs run-019e5a2e474e71c297e452279d4bcdea --follow
+        avr run logs https://github.com/acme/widgets/actions/runs/123456789/job/987654321
     """
     if follow and failed_only:
         raise click.UsageError("--follow and --failed cannot be combined")
@@ -1496,6 +1512,9 @@ def run_logs(
     )
 
     jobs_list: list[dict[str, Any]] = run_data.get("jobs") or []
+    linked_job_id = parse_run_reference(run, api_url=config.public_api_url).platform_job_id
+    if linked_job_id is not None:
+        jobs_list = [j for j in jobs_list if is_platform_job(j, linked_job_id)]
     if job_name_filter:
         needle = job_name_filter.lower()
         jobs_list = [j for j in jobs_list if needle in (j.get("job_name") or "").lower()]
@@ -1589,6 +1608,7 @@ def run_cancel(ctx, run: str, org_id, yes: bool):
     client: ApiClient = ctx.obj["client"]
     config: CliConfig = ctx.obj["config"]
     ensure_authenticated(config)
+    _refuse_job_url(run, config, "cancel")
     org_id, run_id = _resolve_run_id_argument(
         client,
         config,

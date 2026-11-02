@@ -13,6 +13,7 @@ _AVREA_RUN_ID_RE = re.compile(r"(?:run|awr)-[0-9a-f]{32}")
 _ASCII_DECIMAL_RE = re.compile(r"[0-9]+")
 _GITHUB_NAME_RE = re.compile(r"[A-Za-z0-9_.-]+")
 _ORG_SLUG_RE = re.compile(r"[A-Za-z0-9-]+")
+_GITHUB_STEP_FRAGMENT_RE = re.compile(r"step:[0-9]+:[0-9]+")
 _PRODUCTION_CONSOLE_HOST = "console.avrea.com"
 _PRODUCTION_API_URL = "https://api.avrea.com"
 
@@ -37,12 +38,13 @@ class RunReference:
     attempt: int | None = None
     repository_full_name: str | None = None
     organization_slug: str | None = None
+    platform_job_id: int | None = None
 
 
 def _invalid_reference() -> click.ClickException:
     return click.ClickException(
         "Invalid run reference. Expected an Avrea run ID, a positive GitHub run ID, "
-        "a GitHub Actions run URL, or an Avrea console run URL."
+        "a GitHub Actions run or job URL, or an Avrea console run URL."
     )
 
 
@@ -63,7 +65,6 @@ def _parse_trusted_https_url(value: str) -> SplitResult:
         or parts.username is not None
         or parts.password is not None
         or port is not None
-        or parts.fragment
     ):
         raise _invalid_reference()
     return parts
@@ -87,16 +88,25 @@ def _parse_github_url(value: str, parts: SplitResult) -> RunReference:
         raise _invalid_reference()
 
     attempt = None
+    platform_job_id = None
     if len(path) == 8:
-        raw_attempt = path[7]
-        if path[6] != "attempts" or not _ASCII_DECIMAL_RE.fullmatch(raw_attempt):
+        segment, raw_value = path[6], path[7]
+        if segment not in {"attempts", "job"} or not _ASCII_DECIMAL_RE.fullmatch(raw_value):
             raise _invalid_reference()
         try:
-            attempt = int(raw_attempt)
+            parsed_value = int(raw_value)
         except ValueError:
             raise _invalid_reference() from None
-        if attempt < 1:
+        if parsed_value < 1:
             raise _invalid_reference()
+        if segment == "attempts":
+            attempt = parsed_value
+        else:
+            platform_job_id = parsed_value
+
+    # GitHub adds #step:N:M when a log line is selected on a job page.
+    if parts.fragment and (platform_job_id is None or not _GITHUB_STEP_FRAGMENT_RE.fullmatch(parts.fragment)):
+        raise _invalid_reference()
 
     return RunReference(
         raw=value,
@@ -104,6 +114,7 @@ def _parse_github_url(value: str, parts: SplitResult) -> RunReference:
         platform_run_id=platform_run_id,
         attempt=attempt,
         repository_full_name=f"{owner}/{repository}",
+        platform_job_id=platform_job_id,
     )
 
 
@@ -115,6 +126,8 @@ def _console_host_for_api_url(api_url: str) -> str | None:
 
 
 def _parse_avrea_url(value: str, parts: SplitResult, *, api_url: str) -> RunReference:
+    if parts.fragment:
+        raise _invalid_reference()
     if parts.hostname == _PRODUCTION_CONSOLE_HOST:
         required_api_url = _PRODUCTION_API_URL
     elif parts.hostname == _console_host_for_api_url(api_url):
@@ -189,6 +202,37 @@ def _validate_github_repository(run: dict[str, Any], reference: RunReference) ->
         )
 
 
+def is_platform_job(job: Any, platform_job_id: int) -> bool:
+    """Whether an API job record is the GitHub job with this ID, however the API encodes the ID."""
+    return isinstance(job, dict) and str(job.get("platform_job_id")) == str(platform_job_id)
+
+
+def _run_jobs(run: Any) -> list[Any]:
+    jobs = run.get("jobs") if isinstance(run, dict) else None
+    return jobs if isinstance(jobs, list) else []
+
+
+def _run_containing_job(runs: list[Any], platform_job_id: int, platform_run_id: int) -> dict[str, Any]:
+    """Return the first run in ``runs`` that lists the GitHub job, or fail.
+
+    A re-run gives its jobs new IDs, so a job ID normally belongs to one attempt.
+    Callers pass runs newest first, so the newest attempt wins if an ID ever repeats.
+    Never falls back to another attempt: the output would describe the wrong jobs."""
+    for candidate in runs:
+        if any(is_platform_job(job, platform_job_id) for job in _run_jobs(candidate)):
+            return candidate
+    if not any(_run_jobs(candidate) for candidate in runs):
+        raise click.ClickException(
+            f"Avrea returned no job data for GitHub run {platform_run_id}, so job {platform_job_id} "
+            f"cannot be matched to an attempt. Pass the run instead: avr run view {platform_run_id}"
+        )
+    raise click.ClickException(
+        f"GitHub job {platform_job_id} is not listed in any visible attempt of run {platform_run_id} "
+        f"in this organization. Avrea may not track that job. "
+        f"To see the latest attempt, pass the run instead: avr run view {platform_run_id}"
+    )
+
+
 def resolve_run_reference(
     client: ApiClient,
     org_id: str,
@@ -212,13 +256,17 @@ def resolve_run_reference(
     if platform_run_id is None:
         raise _invalid_reference()
 
-    if reference.attempt is None:
+    if reference.attempt is None and reference.platform_job_id is None:
         response = client.public_get(
             f"/orgs/{org_id}/workflow-runs/by-platform-id/{platform_run_id}",
             params=params or None,
         )
         run = _unwrap_run(response)
     else:
+        if reference.platform_job_id is not None:
+            params["include"] = [*(include or [])]
+            if "jobs" not in params["include"]:
+                params["include"].append("jobs")
         response = client.public_get(
             f"/orgs/{org_id}/workflow-runs",
             params={
@@ -231,18 +279,21 @@ def resolve_run_reference(
         runs = response.get("data")
         if not isinstance(runs, list):
             raise click.ClickException("Avrea returned an invalid workflow-run response.")
-        run = next(
-            (
-                candidate
-                for candidate in runs
-                if isinstance(candidate, dict) and candidate.get("run_attempt") == reference.attempt
-            ),
-            None,
-        )
-        if run is None:
-            raise click.ClickException(
-                f"GitHub run {platform_run_id} has no visible attempt {reference.attempt} in this organization."
+        if reference.platform_job_id is not None:
+            run = _run_containing_job(runs, reference.platform_job_id, platform_run_id)
+        else:
+            run = next(
+                (
+                    candidate
+                    for candidate in runs
+                    if isinstance(candidate, dict) and candidate.get("run_attempt") == reference.attempt
+                ),
+                None,
             )
+            if run is None:
+                raise click.ClickException(
+                    f"GitHub run {platform_run_id} has no visible attempt {reference.attempt} in this organization."
+                )
 
     _validate_github_repository(run, reference)
     return run
